@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
@@ -6,12 +7,40 @@ from datetime import datetime
 import uuid, json
 
 from database import get_db
-from models import Client, EnrichmentRequest, CreditTransaction
-from core.security import get_client_by_api_key, get_current_client
+from models import Client, APIKey, EnrichmentRequest, CreditTransaction
+from core.security import get_client_by_api_key, get_current_client, decode_token
 from scrapers.enrichment_engine import EnrichmentEngine
 
 router = APIRouter(prefix="/v1", tags=["Enrichment"])
 engine = EnrichmentEngine()
+
+def get_client_flexible(
+    request: Request,
+    db: Session
+) -> tuple[Client, str]:
+    """Accepte JWT (dashboard) ou x-api-key (intégration client)."""
+    # Essayer x-api-key d'abord
+    api_key_header = request.headers.get("x-api-key")
+    if api_key_header:
+        client, api_key = get_client_by_api_key(api_key_header, db)
+        return client, api_key.id
+
+    # Sinon essayer JWT
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+        payload = decode_token(token)
+        client = db.query(Client).filter(
+            Client.id == payload.get("sub"),
+            Client.is_active == True
+        ).first()
+        if not client:
+            raise HTTPException(status_code=401, detail="Compte introuvable")
+        if client.credits <= 0:
+            raise HTTPException(status_code=402, detail="Crédits insuffisants")
+        return client, None
+
+    raise HTTPException(status_code=401, detail="Authentification requise (x-api-key ou Bearer token)")
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -58,10 +87,10 @@ def _log_request(client: Client, api_key_id: str, req_type: str, query: str, res
 @router.post("/enrich/company")
 async def enrich_company(
     data: CompanyInput,
-    x_api_key: str = Header(...),
+    request: Request,
     db: Session = Depends(get_db)
 ):
-    client, api_key = get_client_by_api_key(x_api_key, db)
+    client, api_key_id = get_client_flexible(request, db)
 
     result = await engine.enrich_company(
         name=data.name,
@@ -75,7 +104,7 @@ async def enrich_company(
     if credits_used > 0:
         _deduct_credit(client, db, credits_used, f"Enrichissement entreprise: {data.name}")
 
-    _log_request(client, api_key.id, "company", data.name, result, db)
+    _log_request(client, api_key_id, "company", data.name, result, db)
     db.commit()
 
     result["credits_used"] = credits_used
@@ -87,13 +116,13 @@ async def enrich_company(
 @router.post("/enrich/contact")
 async def enrich_contact(
     data: ContactInput,
-    x_api_key: str = Header(...),
+    request: Request,
     db: Session = Depends(get_db)
 ):
     if not data.email and not (data.first_name and data.last_name):
         raise HTTPException(400, "Fournissez un email ou un prénom + nom")
 
-    client, api_key = get_client_by_api_key(x_api_key, db)
+    client, api_key_id = get_client_flexible(request, db)
 
     result = await engine.enrich_contact(
         email=data.email,
@@ -109,7 +138,7 @@ async def enrich_contact(
         _deduct_credit(client, db, credits_used, f"Enrichissement contact: {query}")
 
     query_str = data.email or f"{data.first_name} {data.last_name}"
-    _log_request(client, api_key.id, "contact", query_str, result, db)
+    _log_request(client, api_key_id, "contact", query_str, result, db)
     db.commit()
 
     result["credits_used"] = credits_used
@@ -126,7 +155,7 @@ async def enrich_batch(
 ):
     if len(companies) > 100:
         raise HTTPException(400, "Maximum 100 entrées par batch")
-    client, api_key = get_client_by_api_key(x_api_key, db)
+    client, api_key_id = get_client_flexible(request, db)
 
     # Vérifier que le client a assez de crédits
     if client.credits < len(companies):
@@ -143,7 +172,7 @@ async def enrich_batch(
         credits_used = 0 if result.get("from_cache") else 1
         if credits_used > 0:
             _deduct_credit(client, db, credits_used, f"Batch: {company.name}")
-        _log_request(client, api_key.id, "batch", company.name, result, db)
+        _log_request(client, api_key_id, "batch", company.name, result, db)
         result["input"] = company.name
         result["credits_used"] = credits_used
         results.append(result)

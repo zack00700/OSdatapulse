@@ -108,26 +108,47 @@ export const authAPI = {
 
 // ── Enrichment ────────────────────────────────────────────────────────────────
 
+function getApiKey(): string {
+  if (typeof window === "undefined") return ""
+  // Get first active production key from localStorage
+  const keys = localStorage.getItem("dp_api_keys")
+  if (keys) {
+    const parsed = JSON.parse(keys)
+    if (parsed.length > 0) return parsed[0]
+  }
+  return localStorage.getItem("dp_prod_key") || ""
+}
+
+async function enrichFetch(path: string, body: any) {
+  const token = getToken()
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  }
+  if (token) headers["Authorization"] = `Bearer ${token}`
+
+  const res = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Erreur serveur" }))
+    throw new Error(err.detail || "Erreur inconnue")
+  }
+  return res.json()
+}
+
 export const enrichAPI = {
   async company(name: string, country?: string, website?: string) {
-    return apiFetch("/v1/enrich/company", {
-      method: "POST",
-      body: JSON.stringify({ name, country, website }),
-    })
+    return enrichFetch("/v1/enrich/company", { name, country, website })
   },
 
   async contact(data: { email?: string; first_name?: string; last_name?: string; company?: string }) {
-    return apiFetch("/v1/enrich/contact", {
-      method: "POST",
-      body: JSON.stringify(data),
-    })
+    return enrichFetch("/v1/enrich/contact", data)
   },
 
   async batch(companies: Array<{ name: string; country?: string }>) {
-    return apiFetch("/v1/enrich/batch", {
-      method: "POST",
-      body: JSON.stringify(companies),
-    })
+    return enrichFetch("/v1/enrich/batch", companies)
   },
 
   async stats() { return apiFetch("/v1/stats") },

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid, hashlib
 
 from database import get_db
@@ -84,7 +84,7 @@ async def register(data: RegisterInput, db: Session = Depends(get_db)):
         id=str(uuid.uuid4()),
         client_id=client.id,
         token_hash=hashlib.sha256(refresh.encode()).hexdigest(),
-        expires_at=datetime.utcnow().replace(day=min(datetime.utcnow().day + 30, 28))
+        expires_at=datetime.utcnow() + timedelta(days=30)
     ))
     db.commit()
 
@@ -111,7 +111,7 @@ async def login(data: LoginInput, db: Session = Depends(get_db)):
         id=str(uuid.uuid4()),
         client_id=client.id,
         token_hash=hashlib.sha256(refresh.encode()).hexdigest(),
-        expires_at=datetime.utcnow().replace(day=min(datetime.utcnow().day + 30, 28))
+        expires_at=datetime.utcnow() + timedelta(days=30)
     ))
     db.commit()
 

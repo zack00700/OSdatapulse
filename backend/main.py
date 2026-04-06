@@ -8,7 +8,7 @@ app = FastAPI(title=settings.APP_NAME, version=settings.VERSION)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://app.datapulse.io"],
+    allow_origins=["http://localhost:3000", "http://localhost:3001", "https://app.datapulse.io"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

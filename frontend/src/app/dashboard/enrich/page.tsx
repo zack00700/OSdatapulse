@@ -43,7 +43,7 @@ export default function EnrichPage() {
       const data = await enrichAPI.company(companyForm.name, companyForm.country || undefined, companyForm.website || undefined)
       setResult(data)
       await refreshClient()
-    } catch (e: any) { setError(e.message) }
+    } catch (e: any) { setError(typeof e.message === 'string' ? e.message : JSON.stringify(e.message)) }
     finally { setLoading(false) }
   }
 
@@ -57,7 +57,7 @@ export default function EnrichPage() {
       const data = await enrichAPI.contact(contactForm)
       setResult(data)
       await refreshClient()
-    } catch (e: any) { setError(e.message) }
+    } catch (e: any) { setError(typeof e.message === 'string' ? e.message : JSON.stringify(e.message)) }
     finally { setLoading(false) }
   }
 
